@@ -1,0 +1,70 @@
+﻿{
+  "configurations": [
+    {
+      "name": "x64-Debug",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "inheritEnvironments": [ "msvc_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "variables": [
+        {
+          "name": "SQLite3_LIBRARY",
+          "value": "C:/ProjLibs/SQLite3/lib/sqlite3.lib",
+          "type": "FILEPATH"
+        },
+        {
+          "name": "SQLite3_INCLUDE_DIR",
+          "value": "C:/ProjLibs/SQLite3/include",
+          "type": "PATH"
+        },
+        {
+          "name": "Boost_INCLUDE_DIR",
+          "value": "C:/ProjLibs/Boost_1.77",
+          "type": "PATH"
+        },
+        {
+          "name": "pugixml_DIR",
+          "value": "C:/ProjLibs/pugixml/out/install/x64-Debug",
+          "type": "PATH"
+        }
+      ]
+    },
+    {
+      "name": "x64-Release",
+      "generator": "Ninja",
+      "configurationType": "Release",
+      "inheritEnvironments": [ "msvc_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "variables": [
+        {
+          "name": "SQLite3_LIBRARY",
+          "value": "C:/ProjLibs/SQLite3/lib/sqlite3.lib",
+          "type": "FILEPATH"
+        },
+        {
+          "name": "SQLite3_INCLUDE_DIR",
+          "value": "C:/ProjLibs/SQLite3/include",
+          "type": "PATH"
+        },
+        {
+          "name": "Boost_INCLUDE_DIR",
+          "value": "C:/ProjLibs/Boost_1.77",
+          "type": "PATH"
+        },
+        {
+          "name": "pugixml_DIR",
+          "value": "C:/ProjLibs/pugixml/out/install/x64-Release",
+          "type": "PATH"
+        }
+      ]
+    }
+  ]
+}
