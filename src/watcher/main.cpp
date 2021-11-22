@@ -2,11 +2,14 @@
 */
 
 #include <iostream>
-#include "watcherApp.h"
+
+#include "application.h"
+
+using std::move;
 
 int main(int argc, char* argv[]) {
-	auto app = watcherApp(std::move(argc), std::move(argv));
+	Application app;
+	if (auto rc = app.load(move(argc), move(argv))) return rc;
 
-
-	return 0;
+	return app.exec();
 }
