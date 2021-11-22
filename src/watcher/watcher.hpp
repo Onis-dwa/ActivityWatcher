@@ -37,6 +37,12 @@ static bool isRunning = false;
 static ull interval = 100; // timer interval
 HWND currH = nullptr; // current window
 
+ull lastGet = 0;
+ull longestGet = 0;
+ull longestPrint = 0;
+array<ull, 10> procGet { 0 };
+array<ull, 10> printInf { 0 };
+
 struct Proc {
 	DWORD pID;
 	DWORD cThread;
@@ -104,7 +110,8 @@ inline size_t getProcInfo(HWND& hw) {
 	return pos;
 }
 void watch() {
-	size_t currI;
+	size_t currI = -1;
+	auto it = procGet.begin();
 	while (isRunning) { // count
 		auto begin = steady_clock::now() ;
 
@@ -119,7 +126,15 @@ void watch() {
 
 		// check does it manage to be completed in the allotted time
 		auto end = steady_clock::now();
-		this_thread::sleep_until(begin + milliseconds(interval));
+
+		lastGet = duration_cast<milliseconds>(end - begin).count();
+		if (lastGet > longestGet) longestGet = lastGet;
+		(*it) = lastGet;
+		if (++it == procGet.end())
+			it = procGet.begin();
+
+		if (end < (begin + milliseconds(interval)))
+			this_thread::sleep_until(begin + milliseconds(interval));
 	}
 	cout << "async stopping" << endl;
 	return;
@@ -186,7 +201,18 @@ void findCollision() {
 	//	cout << fg << endl;
 }
 
-string normalizePart(uint part, string&& name) {
+string normalizeMS(uint& ms) {
+	if (ms) {
+		if (ms > 99)
+			return to_string(ms) + "ms ";
+		else if (ms > 9)
+			return " " + to_string(ms) + "ms ";
+		else
+			return "  " + to_string(ms) + "ms ";
+	}
+	return "  1ms ";
+}
+string normalizePart(uint& part, string&& name) {
 	if (part) {
 		if (part >= 10)
 			return to_string(part) + name;
@@ -196,23 +222,31 @@ string normalizePart(uint part, string&& name) {
 	else
 		return "    ";
 }
-string normalizeTime(ull time, bool useMS) {
-	if (time < 1000)
-		return "            ";
-
+string normalizeMSTime(ull time) {
 	uint ms = time % 1000; time /= 1000;
-	uint s  = time % 60; time /= 60;
-	uint m  = time % 60; time /= 60;
-	uint h  = time % 24;
+	uint  s = time % 60;
+
+	return normalizePart(s, "s ")
+		 + normalizeMS(ms);
+}
+string normalizeTime(ull time) {
+	uint ms = time % 1000; time /= 1000;
+	uint  s = time % 60; time /= 60;
+	uint  m = time % 60; time /= 60;
+	uint  h = time % 24;
 
 	return normalizePart(h, "h ")
-		+ normalizePart(m, "m ")
-		+ normalizePart(s, "s ")
-		+ (useMS ? normalizePart(ms, "ms") : "");
+		 + normalizePart(m, "m ")
+		 + normalizePart(s, "s ");
 }
 
 int startWatcher() {
 	setlocale(LC_ALL, "ru");
+
+	auto it = printInf.begin();
+	ull summPrint = 0;
+	ull summGet = 0;
+	ull lastDiff = 0;
 
 	HANDLE outH = GetStdHandle(STD_OUTPUT_HANDLE);
 	ull printDelay = 1000;
@@ -220,24 +254,40 @@ int startWatcher() {
 	auto workingTime = 0;
 	isRunning = true;
 	auto watcher = async(launch::async, watch);
+	cout << endl;
+	cout << "       average    maximum     last" << endl;
 	while (true) { // draw
 		auto begin = steady_clock::now();
-		SetConsoleCursorPosition(outH, { 0, 4 });
-		cout << "Active window: " << currH
-			 << "\t workTime: " << normalizeTime(workingTime) << endl;
-		for (const auto& it : processInfo) {
+		SetConsoleCursorPosition(outH, { 0, 5 });
+
+		summPrint = accumulate(printInf.begin(), printInf.end(), 1);
+		summGet = accumulate(procGet.begin(), procGet.end(), 1);
+
+		cout << "cout  "
+			<< normalizeMSTime(summPrint / 10) << " "
+			<< normalizeMSTime(longestPrint) << " "
+			<< normalizeMSTime(lastDiff) << endl;
+		cout << " get  "
+			<< normalizeMSTime(summGet / 10) << " "
+			<< normalizeMSTime(longestGet) << " "
+			<< normalizeMSTime(lastGet) << endl;
+
+		cout << "Window: " << currH << "  workTime: " << normalizeTime(workingTime) << endl;
+		for (const auto& it : processInfo)
 			cout << normalizeTime(it.time) << "  " << it.name << endl;
-		}
 
 		auto end = steady_clock::now();
-		auto diff = duration_cast<milliseconds>(end - begin).count();
-		if (diff > printDelay) {
-			printDelay += 1000;
-			_sleep(1000);
-		}
+		lastDiff = duration_cast<milliseconds>(end - begin).count();
+		if (lastDiff > longestPrint) longestPrint = lastDiff;
+		(*it) = lastDiff;
+		if (++it == printInf.end())
+			it = printInf.begin();
 
 		workingTime = duration_cast<milliseconds>(steady_clock::now() - workStart).count();
-		_sleep(printDelay - diff);
+		if ((printDelay - lastDiff) < 1000)
+			this_thread::sleep_for(milliseconds(printDelay - lastDiff));
+		else if (summPrint / 10 > 500) // ignore console pause
+			this_thread::sleep_for(990ms);
 	}
 	CloseHandle(outH);
 	return 0;
