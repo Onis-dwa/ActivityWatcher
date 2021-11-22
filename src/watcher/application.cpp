@@ -11,34 +11,66 @@ using std::string_view;
 using std::cout;
 using std::endl;
 using std::move;
+namespace fs = std::filesystem;
+
+// temp
+#include <pugixml.hpp>
+#include <sqlite3.h>
+#include <boost/asio.hpp>
+using namespace boost::asio;
+using ip::tcp;
+using boost::system::error_code;
+#include "watcher.hpp"
+
 
 int Application::load(int&& argc, char**&& argv) {
 	if(auto rc = processArguments(move(argc), move(argv))) return rc;
+	cout << "dataDir: " << dataDir << endl;
+	cout << "profileName: " << profileName << endl;
 	
-	std::filesystem::current_path(dataDir);
-	cout << "cwd: " << std::filesystem::current_path() << endl;
-	cout << "argc: " << argc << endl;
-	for (int i = 1; i < argc; ++i)
-		cout << "\t" << argv[i] << endl;
+	fs::current_path(dataDir);
+	if (!fs::exists(profileName))
+		fs::create_directory(profileName);
+	fs::current_path(profileName);
 
-	// whitch to datadir
-	// create config by cfgname || default name
-	// create db by dbname || default name
+	cout << "cwd: " << fs::current_path() << endl;
+	return base::exitCodes::SUCCESS;
 
-	// load registred app by path? or name?
-	// store app by id
+	pugi::xml_document doc;
+	if (fs::exists("config.xml")) {
+		pugi::xml_parse_result result = doc.load_file("config.xml");
 
-	// create win32Wathcer
-	// or	  unixWatcher
+		if (result)
+			cout << "xml load" << endl;
+		else
+			cout << "xml not load" << endl;
+	}
+	else {
+		auto declarationNode = doc.append_child(pugi::node_declaration);
+		declarationNode.append_attribute("version") = WATCHER_VERSION;
+		declarationNode.append_attribute("encoding") = "UTF-8";
+
+		auto root = doc.append_child("root");
+
+		bool saveSucceeded = doc.save_file("config.xml", PUGIXML_TEXT("  "));
+		cout << "saveSucceeded: " << saveSucceeded << endl;
+	}
+
+	sqlite3* db;
+	auto rc = sqlite3_open("db.sqlite3", &db);
+	cout << "Open db: " << (rc ? "FAIL" : "SUCCESS");
+	sqlite3_close(db);
+
+	io_service service;
+	tcp::socket socket(service);
+	tcp::acceptor acceptor(service, tcp::endpoint(tcp::v4(), 32094));
+	cout << "socket created" << endl;
+
 	return base::exitCodes::SUCCESS;
 }
 
 int Application::exec() {
-	//int i = 0;
-	//std::cin >> i;
-
-	// run watcher
-
+	auto rc = startWatcher();
 	return base::exitCodes::SUCCESS;
 }
 
@@ -95,6 +127,8 @@ int Application::processArguments(int&& argc, char**&& argv) {
 
 	if (dataDir.empty())
 		dataDir = appDir;
+	if (profileName.empty())
+		profileName = "profile-default";
 
 	return base::exitCodes::SUCCESS;
 }

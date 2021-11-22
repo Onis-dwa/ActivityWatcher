@@ -3,6 +3,7 @@
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 project(ActivityWatcher VERSION 1)
+add_definitions(-DWATCHER_VERSION="1.0")
 
 
 # libs
