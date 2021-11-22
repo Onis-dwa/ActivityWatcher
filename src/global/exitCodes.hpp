@@ -10,7 +10,8 @@ enum exitCodes {
 	// load
 	ARG_FIRST_FAIL,
 	ARG_FIND_FAIL,
-	ARG_SWITCH_FAIL,
+	ARG_INDX_FAIL,
+	ARG_COLLISION,
 };
 
 }

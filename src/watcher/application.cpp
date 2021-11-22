@@ -1,11 +1,11 @@
 #include <iostream>
 #include <filesystem>
-
 #include <string_view>
 using namespace std::literals::string_view_literals;
 using std::string_view;
 
-#include <exitCodes.hpp>
+#include "exitCodes.hpp"
+#include "utility.hpp"
 #include "application.h"
 
 using std::cout;
@@ -14,7 +14,7 @@ using std::move;
 
 int Application::load(int&& argc, char**&& argv) {
 	if(auto rc = processArguments(move(argc), move(argv))) return rc;
-
+	
 	std::filesystem::current_path(dataDir);
 	cout << "cwd: " << std::filesystem::current_path() << endl;
 	cout << "argc: " << argc << endl;
@@ -44,38 +44,48 @@ int Application::exec() {
 
 int Application::processArguments(int&& argc, char**&& argv) {
 	if (!parseFirstArg(argv[0])) return base::exitCodes::ARG_FIRST_FAIL;
-
-	enum class KeyFormat {
-		NoValues,
-		OneValue,
+	
+	constexpr string_view CMD_HELP    = "--help"sv;
+	constexpr string_view CMD_DATADIR = "--datadir"sv;
+	constexpr string_view CMD_PROFILE = "--profile"sv;
+	constexpr std::array commands {
+		CMD_HELP, CMD_DATADIR, CMD_PROFILE
 	};
+	
+	constexpr size_t CMD_CNT      = commands.size();
+	constexpr size_t CMDI_HELP    = getIndxByValue(commands, CMD_HELP);
+	constexpr size_t CMDI_DATADIR = getIndxByValue(commands, CMD_DATADIR);
+	constexpr size_t CMDI_PROFILE = getIndxByValue(commands, CMD_PROFILE);
 
-	auto commands = std::array<string_view, 3> {
-		"--help"sv, "--datadir"sv, "--profile"sv
-	};
-
-	cout << "pn: " << profileName << endl;
+	auto collisions = std::array<bool, CMD_CNT> { false };
 	for (unsigned int i = 1; i < argc; ++i) {
 		auto it = std::find(commands.cbegin(), commands.cend(), argv[i]);
 
 		if (it != commands.cend()) {
 			auto indx = it - commands.cbegin();
+			if (indx < 0 || indx >= CMD_CNT) {
+				cout << "Error: arg parse command indx out of range: "
+					<< indx << endl;
+				return base::exitCodes::ARG_INDX_FAIL;
+			}
+			if (collisions.at(indx)) {
+				cout << "Error: arg parse duplicate command: "
+					<< argv[i] << endl;
+				return base::exitCodes::ARG_COLLISION;
+			}
+			collisions[indx] = true;
 
 			switch (indx) {
-			case 0:
+			case CMDI_HELP:
 				cout << "Help!"; // TODO draw help
 				return base::exitCodes::ARG_HELP;
-			case 1:
+			case CMDI_DATADIR:
 				dataDir = move(argv[++i]);
 				break;
-			case 2:
+			case CMDI_PROFILE:
 				profileName = move(argv[++i]);
 				break;
-			default:
-				cout << "Error: arg parse command indx out of range.\n";
-				return base::exitCodes::ARG_SWITCH_FAIL;
 			}
-			continue;
 		}
 		else {
 			cout << endl << "Wrong parametr at " << i << " <" << argv[i] << ">\n";
