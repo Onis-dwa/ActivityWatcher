@@ -11,9 +11,31 @@
 #include <map>
 #include <vector>
 #include <array>
+#include <algorithm>
+#include <execution>
+
+#include "utility.hpp"
 
 using namespace std;
 using namespace std::chrono;
+typedef unsigned int uint;
+typedef unsigned long long ull;
+
+struct ProcData {
+	ProcData(string&& fn): fullName(fn), time(0) {
+		nameFromFullName(fullName, name);
+	}
+
+	string fullName;
+	string name;
+	ull time;
+};
+vector<ProcData> processInfo; // all process
+static size_t pSize = processInfo.size();
+map<HWND, size_t> chacheProcess; // active process
+static bool isRunning = false;
+static ull interval = 100; // timer interval
+HWND currH = nullptr; // current window
 
 struct Proc {
 	DWORD pID;
@@ -23,13 +45,84 @@ struct Proc {
 	unsigned int time;
 };
 map<HWND, Proc*> ActiveProcess;
-static TCHAR fullName[MAX_PATH] = { 0 };
+static TCHAR fullName[MAX_PATH] = { 0 }; // only for GetModuleFileNameEx
 
-string normalizeTime(unsigned long long time) {
-	int s = time % 60; time /= 60;
-	int m = time % 60; time /= 60;
-	int h = time % 24;
-	return to_string(h) + "h " + to_string(m) + "m " + to_string(s) + "s";
+// TODO err log
+inline auto findInProcInfo(string& fn) {
+	return find_if(
+		std::execution::parallel_unsequenced_policy(),
+		processInfo.cbegin(),
+		processInfo.cend(),
+		[&](const ProcData& i) {return i.fullName == fn; });
+}
+inline size_t registryInProccInfo(string&& fn) {
+	auto it = findInProcInfo(fn);
+	if (it == processInfo.cend()) {
+		auto ref = processInfo.emplace_back(ProcData(move(fn)));
+		pSize = processInfo.size();
+		if (processInfo[pSize - 1].fullName == ref.fullName)
+			return pSize - 1;
+		// errLog wtf?
+		it = findInProcInfo(ref.fullName);
+		if (it == processInfo.cend())
+			return -1; // never happen (i guess)
+	}
+	
+	return it - processInfo.cbegin(); // 0 .. size - 1
+}
+inline string getFullName(HWND& hw) {
+	DWORD pID;
+	DWORD cThread = GetWindowThreadProcessId(hw, &pID);
+	if (pID || cThread) {
+		HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pID);
+		if (hProc) {
+			DWORD nlen = GetModuleFileNameEx((HANDLE)hProc, nullptr, fullName, MAX_PATH);
+			CloseHandle(hProc);
+
+			if (nlen) {
+				return fullName;
+			}
+			// error nlen
+		}
+		CloseHandle(hProc);
+		// errLog hProc
+	}
+	// errLog pID cThread
+	return "";
+}
+inline size_t getProcInfo(HWND& hw) {
+	string hwFullName = getFullName(hw);
+	if (hwFullName.empty())
+		return (size_t)-1; // MAX
+
+	auto it = chacheProcess.find(hw);
+	if (it != chacheProcess.end())
+		if ((it->second <= pSize) && (processInfo[it->second].fullName == hwFullName))
+			return it->second;
+	size_t pos = registryInProccInfo(move(hwFullName));
+	chacheProcess[hw] = pos;
+	return pos;
+}
+void watch() {
+	size_t currI;
+	while (isRunning) { // count
+		auto begin = steady_clock::now() ;
+
+		HWND fgH = GetForegroundWindow();
+		if (fgH) { // because `can be NULL in certain circumstances` (docs.microsoft)
+			if (currH != fgH) // change currI
+				currI = getProcInfo(currH = fgH);
+			
+			if (currI < pSize)
+				processInfo[currI].time += interval;
+		}
+
+		// check does it manage to be completed in the allotted time
+		auto end = steady_clock::now();
+		this_thread::sleep_until(begin + milliseconds(interval));
+	}
+	cout << "async stopping" << endl;
+	return;
 }
 
 HWND createProc() {
@@ -67,150 +160,85 @@ HWND createProc() {
 	CloseHandle(processInfo.hThread);
 	return fgHandle;
 }
+void findCollision() {
+	// checking  collision when HWND poiners
+	// result: collision can not be?
 
-#include <filesystem>
-using namespace filesystem;
-
-int startWatcher() {
-	if (false) {
-		// checking  collision when HWND poiners
-		// result: collision can not be?
-
-		constexpr int LEN = 1000;
-		//vector<HWND> fgs;
-		array<HWND, LEN> fgs;
-		for (int i = 0; i < LEN; ++i) {
-			HWND fg = createProc();
-			cout << fg;
-			auto it = find(fgs.begin(), fgs.end(), fg);
-			if (it != fgs.end()) {
-				cout << "collision found";
-				break;
-			}
-			else {
-				fgs[i] = move(fg);
-			}
-			cout << endl;
-		}
-		//sort(fgs.begin(), fgs.end());
-		//cout << endl;
-		//for (const auto& fg : fgs)
-		//	cout << fg << endl;
-
-		return 0;
-	}
-
-	setlocale(LC_ALL, "ru");
-
-	int iters = 0;
-	int summ = 0;
-
-	// move cursor in console
-	if (false) {
-		HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
-		cout << "Cur diff = [ns] ";
-		while (true) {
-			steady_clock::time_point curb = steady_clock::now();
-			SetConsoleCursorPosition(output, { 16, 0 });
-			steady_clock::time_point cure = steady_clock::now();
-			cout << duration_cast<nanoseconds> (cure - curb).count();
-			_sleep(1000);
-		}
-		CloseHandle(output);
-		return 0;
-	}
-
-	unsigned long long i = 0;
-	while (true) {
-		cout << endl;
-		_sleep(1000);
-
-		steady_clock::time_point allBegin = steady_clock::now();
-
-		HWND fgHandle = GetForegroundWindow();
-		cout << "Active window: " << fgHandle << "\t iteration: " << i << endl;
-		steady_clock::time_point procBegin = steady_clock::now();
-		if (fgHandle) {
-			auto it = ActiveProcess.find(fgHandle);
-			if (it != ActiveProcess.end()) {
-				it->second->time++;
-			}
-			else {
-				Proc* proc = new Proc();
-				proc->cThread = GetWindowThreadProcessId(fgHandle, &proc->pID);
-				if (proc->pID || proc->cThread) {
-					HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, proc->pID);
-					if (hProc) {
-						DWORD nlen = GetModuleFileNameEx((HANDLE)hProc, nullptr, fullName, MAX_PATH);
-						CloseHandle(hProc);
-
-						if (nlen) {
-							proc->fullName = fullName;
-							proc->name = proc->fullName.substr(proc->fullName.rfind('\\') + 1);
-							proc->time = 0;
-
-							ActiveProcess.emplace(fgHandle, proc);
-						}
-						else {
-							cout << "error: nlen: " << nlen << " ";
-							delete proc;
-						}
-					}
-					else {
-						cout << "error: hProc: " << &hProc << " ";
-						delete proc;
-					}
-				}
-				else {
-					cout << "error: pId: " << proc->pID
-						<< " cThread: " << proc->cThread;
-					delete proc;
-				}
-			}
+	constexpr int LEN = 1000;
+	//vector<HWND> fgs;
+	array<HWND, LEN> fgs;
+	for (int i = 0; i < LEN; ++i) {
+		HWND fg = createProc();
+		cout << fg;
+		auto it = find(fgs.begin(), fgs.end(), fg);
+		if (it != fgs.end()) {
+			cout << "collision found";
+			break;
 		}
 		else {
-			cout << "error handle is " << fgHandle;
+			fgs[i] = move(fg);
 		}
-
-		steady_clock::time_point procEnd = steady_clock::now();
-
-		WINDOWINFO* winfo = new WINDOWINFO();
-		winfo->cbSize = sizeof(WINDOWINFO);
-		for (const auto& it : ActiveProcess) {
-			//steady_clock::time_point Get1B = steady_clock::now();
-			//bool isAlive1 = GetWindowInfo(it.first, winfo); // too lazy
-			//steady_clock::time_point Get1E = steady_clock::now();
-			steady_clock::time_point Get2B = steady_clock::now();
-			DWORD isAlive2 = GetWindowThreadProcessId(it.first, 0); // fasters than 10x
-			steady_clock::time_point Get2E = steady_clock::now();
-
-			cout << normalizeTime(it.second->time) << "  " << it.second->name
-				//<< (isAlive1 ? " alive1" : " expired1")
-				<< (isAlive2 ? " alive2" : " expired2")
-				//<< " fir: " << duration_cast<nanoseconds> (Get1E - Get1B).count() << "[ns]"
-				<< " sec: " << duration_cast<nanoseconds> (Get2E - Get2B).count() << "[ns]"
-				<< endl;
-		}
-
-		steady_clock::time_point allEnd = steady_clock::now();
-		std::cout << "get proc data diff = " << duration_cast<nanoseconds> (procEnd - procBegin).count() << "[ns]" << std::endl;
-		std::cout << "Summary difference = " << duration_cast<nanoseconds> (allEnd - allBegin).count() << "[ns]" << std::endl;
-
-		i++;
-		continue;
-
-
-		summ += duration_cast<microseconds> (allEnd - allBegin).count();
-		std::cout << "Time difference = " << duration_cast<microseconds>(allEnd - allBegin).count() << "[µs]" << std::endl;
-		std::cout << "Time difference = " << duration_cast<nanoseconds> (allEnd - allBegin).count() << "[ns]" << std::endl;
-
-		_sleep(1000);
-		i++;
-		iters++;
+		cout << endl;
 	}
+	//sort(fgs.begin(), fgs.end());
+	//cout << endl;
+	//for (const auto& fg : fgs)
+	//	cout << fg << endl;
+}
 
-	cout << "is: " << summ / iters;
-	// 124
+string normalizePart(uint part, string&& name) {
+	if (part) {
+		if (part >= 10)
+			return to_string(part) + name;
+		else
+			return " " + to_string(part) + name;
+	}
+	else
+		return "    ";
+}
+string normalizeTime(ull time, bool useMS) {
+	if (time < 1000)
+		return "            ";
 
+	uint ms = time % 1000; time /= 1000;
+	uint s  = time % 60; time /= 60;
+	uint m  = time % 60; time /= 60;
+	uint h  = time % 24;
+
+	return normalizePart(h, "h ")
+		+ normalizePart(m, "m ")
+		+ normalizePart(s, "s ")
+		+ (useMS ? normalizePart(ms, "ms") : "");
+}
+
+int startWatcher() {
+	setlocale(LC_ALL, "ru");
+
+	HANDLE outH = GetStdHandle(STD_OUTPUT_HANDLE);
+	ull printDelay = 1000;
+	auto workStart = steady_clock::now();
+	auto workingTime = 0;
+	isRunning = true;
+	auto watcher = async(launch::async, watch);
+	while (true) { // draw
+		auto begin = steady_clock::now();
+		SetConsoleCursorPosition(outH, { 0, 4 });
+		cout << "Active window: " << currH
+			 << "\t workTime: " << normalizeTime(workingTime) << endl;
+		for (const auto& it : processInfo) {
+			cout << normalizeTime(it.time) << "  " << it.name << endl;
+		}
+
+		auto end = steady_clock::now();
+		auto diff = duration_cast<milliseconds>(end - begin).count();
+		if (diff > printDelay) {
+			printDelay += 1000;
+			_sleep(1000);
+		}
+
+		workingTime = duration_cast<milliseconds>(steady_clock::now() - workStart).count();
+		_sleep(printDelay - diff);
+	}
+	CloseHandle(outH);
 	return 0;
 }

@@ -135,9 +135,7 @@ int Application::processArguments(int&& argc, char**&& argv) {
 
 bool Application::parseFirstArg(char*& arg) {
 	appDir = arg;
-	auto pos = appDir.rfind(std::filesystem::path::preferred_separator);
-	appName = move(appDir.substr(pos + 1));
-	appDir.erase(pos);
+	appDir.erase(nameFromFullName(appDir, appName));
 
 	if (appDir.empty() || appName.empty())
 		return false;
