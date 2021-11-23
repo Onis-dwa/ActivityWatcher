@@ -36,12 +36,14 @@ map<HWND, size_t> chacheProcess; // active process
 static bool isRunning = false;
 static ull interval = 100; // timer interval
 HWND currH = nullptr; // current window
+CONSOLE_SELECTION_INFO selectionInf; // for dwFlags
 
 ull lastGet = 0;
 ull longestGet = 0;
 ull longestPrint = 0;
-array<ull, 10> procGet { 0 };
-array<ull, 10> printInf { 0 };
+constexpr ull ARR_CNT = 25;
+array<ull, ARR_CNT> procGet { 0 };
+array<ull, ARR_CNT> printInf { 0 };
 
 struct Proc {
 	DWORD pID;
@@ -112,9 +114,8 @@ inline size_t getProcInfo(HWND& hw) {
 void watch() {
 	size_t currI = -1;
 	auto it = procGet.begin();
+	auto begin = steady_clock::now(); 
 	while (isRunning) { // count
-		auto begin = steady_clock::now() ;
-
 		HWND fgH = GetForegroundWindow();
 		if (fgH) { // because `can be NULL in certain circumstances` (docs.microsoft)
 			if (currH != fgH) // change currI
@@ -124,17 +125,19 @@ void watch() {
 				processInfo[currI].time += interval;
 		}
 
-		// check does it manage to be completed in the allotted time
-		auto end = steady_clock::now();
+		// ignore console input (because all cout && now() freezes and return invalid values)
+		if (selectionInf.dwFlags == 0) {
+			// check does it manage to be completed in the allotted time
+			if (lastGet > longestGet) longestGet = lastGet;
+			(*it) = lastGet;
+			if (++it == procGet.end())
+				it = procGet.begin();
 
-		lastGet = duration_cast<milliseconds>(end - begin).count();
-		if (lastGet > longestGet) longestGet = lastGet;
-		(*it) = lastGet;
-		if (++it == procGet.end())
-			it = procGet.begin();
+			lastGet = duration_cast<milliseconds>(steady_clock::now() - begin).count();
+		}
 
-		if (end < (begin + milliseconds(interval)))
-			this_thread::sleep_until(begin + milliseconds(interval));
+		begin += milliseconds(interval);
+		this_thread::sleep_until(begin);
 	}
 	cout << "async stopping" << endl;
 	return;
@@ -210,7 +213,7 @@ string normalizeMS(uint& ms) {
 		else
 			return "  " + to_string(ms) + "ms ";
 	}
-	return "  1ms ";
+	return "      ";
 }
 string normalizePart(uint& part, string&& name) {
 	if (part) {
@@ -226,6 +229,8 @@ string normalizeMSTime(ull time) {
 	uint ms = time % 1000; time /= 1000;
 	uint  s = time % 60;
 
+	if (s == 0 && ms == 0)
+		return "     >1ms ";
 	return normalizePart(s, "s ")
 		 + normalizeMS(ms);
 }
@@ -243,51 +248,59 @@ string normalizeTime(ull time) {
 int startWatcher() {
 	setlocale(LC_ALL, "ru");
 
+	// run-time stat
 	auto it = printInf.begin();
 	ull summPrint = 0;
 	ull summGet = 0;
 	ull lastDiff = 0;
 
+	cin.get();
 	HANDLE outH = GetStdHandle(STD_OUTPUT_HANDLE);
-	ull printDelay = 1000;
-	auto workStart = steady_clock::now();
-	auto workingTime = 0;
+	auto startTime = steady_clock::now();
+	auto workingTime = startTime;
+
+	// start watcher
 	isRunning = true;
+	GetConsoleSelectionInfo(&selectionInf);
 	auto watcher = async(launch::async, watch);
-	cout << endl;
-	cout << "       average    maximum     last" << endl;
+
+	// printing
+	cout << endl << "       average    maximum     last" << endl;
 	while (true) { // draw
-		auto begin = steady_clock::now();
-		SetConsoleCursorPosition(outH, { 0, 5 });
+		// ignore console input (because all cout && now() freezes and return invalid values)
+		if (GetConsoleSelectionInfo(&selectionInf) && (selectionInf.dwFlags == 0)) {
+			summPrint = accumulate(printInf.begin(), printInf.end(), 1);
+			summGet = accumulate(procGet.begin(), procGet.end(), 1);
+			SetConsoleCursorPosition(outH, { 0, 5 });
 
-		summPrint = accumulate(printInf.begin(), printInf.end(), 1);
-		summGet = accumulate(procGet.begin(), procGet.end(), 1);
+			cout << "cout  "
+				<< normalizeMSTime(summPrint / ARR_CNT) << " "
+				<< normalizeMSTime(longestPrint) << " "
+				<< normalizeMSTime(lastDiff) << endl;
+			cout << " get  "
+				<< normalizeMSTime(summGet / ARR_CNT) << " "
+				<< normalizeMSTime(longestGet) << " "
+				<< normalizeMSTime(lastGet) << endl;
 
-		cout << "cout  "
-			<< normalizeMSTime(summPrint / 10) << " "
-			<< normalizeMSTime(longestPrint) << " "
-			<< normalizeMSTime(lastDiff) << endl;
-		cout << " get  "
-			<< normalizeMSTime(summGet / 10) << " "
-			<< normalizeMSTime(longestGet) << " "
-			<< normalizeMSTime(lastGet) << endl;
 
-		cout << "Window: " << currH << "  workTime: " << normalizeTime(workingTime) << endl;
-		for (const auto& it : processInfo)
-			cout << normalizeTime(it.time) << "  " << it.name << endl;
+			cout << "Window: " << currH
+				<< "  workTime: " << normalizeTime(
+					duration_cast<milliseconds>(workingTime - startTime).count())
+				<< endl;
+			for (const auto& it : processInfo)
+				cout << normalizeTime(it.time) << "  " << it.name << endl;
 
-		auto end = steady_clock::now();
-		lastDiff = duration_cast<milliseconds>(end - begin).count();
-		if (lastDiff > longestPrint) longestPrint = lastDiff;
-		(*it) = lastDiff;
-		if (++it == printInf.end())
-			it = printInf.begin();
+			// run-time stat
+			if (lastDiff > longestPrint) longestPrint = lastDiff;
+			(*it) = lastDiff;
+			if (++it == printInf.end())
+				it = printInf.begin();
 
-		workingTime = duration_cast<milliseconds>(steady_clock::now() - workStart).count();
-		if ((printDelay - lastDiff) < 1000)
-			this_thread::sleep_for(milliseconds(printDelay - lastDiff));
-		else if (summPrint / 10 > 500) // ignore console pause
-			this_thread::sleep_for(990ms);
+			lastDiff = duration_cast<milliseconds>(steady_clock::now() - workingTime).count();
+		}
+
+		workingTime += milliseconds(500);
+		this_thread::sleep_until(workingTime);
 	}
 	CloseHandle(outH);
 	return 0;
